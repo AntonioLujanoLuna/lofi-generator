@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lofi Generator</title>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Visualization -->
+    <section class="visualization-section">
+      <canvas id="visualizer"></canvas>
+    </section>
+
+    <!-- Main Controls -->
+    <section class="main-controls">
+      <div class="chord-display">
+        <span class="label">Current Chord:</span>
+        <span id="current-chord" class="chord-name">—</span>
+      </div>
+      <div class="bpm-control">
+        <span class="label">BPM:</span>
+        <input type="range" id="bpm-slider" min="60" max="100" value="75">
+        <span id="bpm-value" class="value">75</span>
+      </div>
+    </section>
+
+    <!-- Transport Controls -->
+    <section class="transport-controls">
+      <button id="play-btn" class="btn btn-primary">
+        <span class="play-icon">▶</span> Play
+      </button>
+      <button id="regenerate-btn" class="btn btn-secondary">
+        <span class="regenerate-icon">↻</span> New
+      </button>
+      <button id="record-btn" class="btn btn-secondary">
+        <span class="record-icon">●</span> Rec
+      </button>
+    </section>
+
+    <!-- Mood Selector -->
+    <section class="mood-section">
+      <label for="mood-select" class="label">Mood:</label>
+      <select id="mood-select" class="select">
+        <option value="chill">Chill</option>
+        <option value="rainy">Rainy</option>
+        <option value="melancholic">Melancholic</option>
+        <option value="upbeat">Upbeat</option>
+      </select>
+    </section>
+
+    <!-- Mix Controls -->
+    <section class="mix-section">
+      <h3 class="section-title">Mix</h3>
+      <div class="mix-control">
+        <label class="label">Master</label>
+        <input type="range" id="master-volume" min="0" max="100" value="80">
+      </div>
+      <div class="mix-control">
+        <label class="label">Drums</label>
+        <input type="range" id="drums-volume" min="0" max="100" value="70">
+        <button id="drums-mute" class="btn btn-mute">M</button>
+      </div>
+      <div class="mix-control">
+        <label class="label">Bass</label>
+        <input type="range" id="bass-volume" min="0" max="100" value="70">
+        <button id="bass-mute" class="btn btn-mute">M</button>
+      </div>
+      <div class="mix-control">
+        <label class="label">Pad</label>
+        <input type="range" id="pad-volume" min="0" max="100" value="60">
+        <button id="pad-mute" class="btn btn-mute">M</button>
+      </div>
+      <div class="mix-control">
+        <label class="label">Ambience</label>
+        <input type="range" id="ambience-volume" min="0" max="100" value="40">
+        <button id="ambience-mute" class="btn btn-mute">M</button>
+      </div>
+    </section>
+
+    <!-- Effects Controls -->
+    <section class="effects-section">
+      <h3 class="section-title">Effects</h3>
+      <div class="effect-control">
+        <label class="label">Filter</label>
+        <input type="range" id="filter-cutoff" min="200" max="8000" value="3200">
+      </div>
+      <div class="effect-control">
+        <label class="label">Reverb</label>
+        <input type="range" id="reverb-wet" min="0" max="100" value="30">
+      </div>
+    </section>
+
+    <!-- Loading Indicator -->
+    <div id="loading" class="loading">
+      <span>Loading samples...</span>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
