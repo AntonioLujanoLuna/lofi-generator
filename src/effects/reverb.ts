@@ -11,7 +11,6 @@ export class SimpleReverb {
 
   // Delay times in seconds (prime-ish numbers for dense reverb)
   private delayTimes = [0.029, 0.037, 0.043, 0.053];
-  private feedbackAmount = 0.7;
 
   constructor() {
     const ctx = getContext();
@@ -29,51 +28,36 @@ export class SimpleReverb {
     this.outputGain = ctx.createGain();
     this.outputGain.gain.value = 1;
 
-    // Create feedback delay network
+    // Create parallel delay lines (simpler, more stable than FDN)
     for (let i = 0; i < 4; i++) {
       const delay = ctx.createDelay(1);
       delay.delayTime.value = this.delayTimes[i];
 
+      // Each delay has its own feedback loop (not cross-fed)
       const feedback = ctx.createGain();
-      feedback.gain.value = this.feedbackAmount;
+      feedback.gain.value = 0.5; // Safe feedback amount
 
       const filter = ctx.createBiquadFilter();
       filter.type = 'lowpass';
-      filter.frequency.value = 4000 - i * 500; // Varied filtering
+      filter.frequency.value = 3000 - i * 400; // Progressively darker
 
       this.delays.push(delay);
       this.feedbacks.push(feedback);
       this.filters.push(filter);
-    }
 
-    // Connect the feedback delay network
-    this.connectFDN();
+      // Connect: input → delay → filter → feedback → delay (loop)
+      //                              ↓
+      //                          wetGain (output)
+      this.inputGain.connect(delay);
+      delay.connect(filter);
+      filter.connect(feedback);
+      feedback.connect(delay); // Self-feedback only
+      filter.connect(this.wetGain);
+    }
 
     // Connect dry path
     this.inputGain.connect(this.dryGain);
     this.dryGain.connect(this.outputGain);
-  }
-
-  /**
-   * Connect the feedback delay network
-   */
-  private connectFDN(): void {
-    // Connect input to all delays
-    for (let i = 0; i < 4; i++) {
-      this.inputGain.connect(this.delays[i]);
-      this.delays[i].connect(this.filters[i]);
-      this.filters[i].connect(this.feedbacks[i]);
-      this.filters[i].connect(this.wetGain);
-
-      // Cross-feed to other delays for density
-      for (let j = 0; j < 4; j++) {
-        if (i !== j) {
-          const crossGain = this.feedbacks[i];
-          crossGain.connect(this.delays[j]);
-        }
-      }
-    }
-
     this.wetGain.connect(this.outputGain);
   }
 
@@ -90,8 +74,8 @@ export class SimpleReverb {
    * Set decay time by adjusting feedback
    */
   setDecay(seconds: number): void {
-    // Longer decay = higher feedback
-    const feedback = Math.min(0.95, seconds / 5);
+    // Longer decay = higher feedback, but cap at 0.7 for stability
+    const feedback = Math.min(0.7, seconds / 5);
     const ctx = getContext();
 
     for (const fb of this.feedbacks) {

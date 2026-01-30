@@ -90,14 +90,11 @@ async function init(): Promise<void> {
   // Wire up signal chain
   const buses = getBuses();
 
-  // Disconnect default routing
+  // Disconnect default routing (instruments already connected to drums/bass/pad in audio-engine)
   buses.instruments.disconnect();
 
   // New routing: instruments → sidechain → lowpass → saturator → reverb → master
-  buses.drums.connect(buses.instruments);
-  buses.bass.connect(buses.instruments);
-  buses.pad.connect(buses.instruments);
-
+  // (drums/bass/pad → instruments connections already exist from audio-engine.ts)
   buses.instruments.connect(sidechain.getInputNode());
   sidechain.getOutputNode().connect(lowpassFilter.getInputNode());
   lowpassFilter.getOutputNode().connect(saturator.getInputNode());
