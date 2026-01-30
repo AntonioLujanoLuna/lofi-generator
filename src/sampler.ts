@@ -4,10 +4,10 @@ import { getContext, getBuses } from './audio-engine';
 const sampleBuffers = new Map<DrumSample, AudioBuffer>();
 
 const SAMPLE_PATHS: Record<DrumSample, string> = {
-  'kick': '/samples/kick.wav',
-  'snare': '/samples/snare.wav',
-  'hat-closed': '/samples/hat-closed.wav',
-  'hat-open': '/samples/hat-open.wav'
+  'kick': './samples/kick.wav',
+  'snare': './samples/snare.wav',
+  'hat-closed': './samples/hat-closed.wav',
+  'hat-open': './samples/hat-open.wav'
 };
 
 /**
