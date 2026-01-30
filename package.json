@@ -9,11 +9,7 @@
     "preview": "vite preview"
   },
   "devDependencies": {
-    "@rollup/rollup-win32-x64-msvc": "^4.57.1",
     "typescript": "^5.3.3",
     "vite": "^5.0.12"
-  },
-  "optionalDependencies": {
-    "@rollup/rollup-win32-x64-msvc": "^4.57.1"
   }
 }
