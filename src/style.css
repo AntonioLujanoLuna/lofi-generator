@@ -74,6 +74,19 @@ html, body {
   color: var(--accent-primary);
 }
 
+.section-display {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing);
+}
+
+.section-name {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+
 .bpm-control {
   display: flex;
   align-items: center;
@@ -166,11 +179,28 @@ html, body {
 /* Mood Section */
 .mood-section {
   display: flex;
-  align-items: center;
-  gap: calc(var(--spacing) * 2);
+  flex-direction: column;
+  gap: calc(var(--spacing) * 1.5);
   padding: calc(var(--spacing) * 2);
   background-color: var(--bg-surface);
   border-radius: var(--radius-panel);
+}
+
+.mood-row, .preset-row {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+}
+
+.btn-small {
+  padding: var(--spacing) calc(var(--spacing) * 1.5);
+  font-size: 0.875rem;
+  background-color: var(--accent-secondary);
+  color: var(--text-primary);
+}
+
+.btn-small:hover {
+  background-color: #5a6578;
 }
 
 .select {

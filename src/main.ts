@@ -1,13 +1,15 @@
-import type { MoodPreset, ChordProgression, DrumPattern, BassNote, Chord } from './types';
+import type { MoodPreset, ChordProgression, DrumPattern, BassNote, MelodyNote, Chord } from './types';
 import { initAudioEngine, resumeAudio, getContext, getBuses, getAnalyser, setMasterVolume, setDrumsVolume, setBassVolume, setPadVolume, setAmbienceVolume } from './audio-engine';
 import { loadSamples, playDrumSample } from './sampler';
 import { getTransport } from './sequencer';
-import { SubBassSynth, PadSynth } from './synths';
-import { ChordProgressionGenerator, BasslineGenerator, DrumPatternGenerator } from './generators';
-import { LowpassFilter, Saturator, SimpleReverb, VinylNoise, SidechainCompressor } from './effects';
-import { chordToMidiNotes, getChordDisplayName, transposeToOctave } from './music-theory';
+import { SubBassSynth, PadSynth, RhodesSynth } from './synths';
+import { ChordProgressionGenerator, BasslineGenerator, DrumPatternGenerator, MelodyGenerator } from './generators';
+import { LowpassFilter, Saturator, SimpleReverb, VinylNoise, SidechainCompressor, TapeDegradation } from './effects';
+import { chordToMidiNotes, getChordDisplayName, transposeToOctave, voiceLeadTo } from './music-theory';
 import { MOOD_CONFIGS, BARS_PER_PROGRESSION, STEPS_PER_BAR } from './config';
 import { randomInt } from './utils';
+import { SongStructureManager } from './song-structure';
+import { PresetManager, Preset } from './preset-manager';
 
 // State
 let isPlaying = false;
@@ -16,32 +18,44 @@ let currentMood: MoodPreset = 'chill';
 let progression: ChordProgression | null = null;
 let drumPatterns: DrumPattern[] = [];
 let bassPatterns: BassNote[][] = [];
+let melodyPatterns: MelodyNote[][] = [];
 let currentBar = 0;
+let previousPadVoicing: number[] = [];
 
 // Audio components
 let bassSynth: SubBassSynth;
 let padSynth: PadSynth;
+let rhodesSynth: RhodesSynth;
 let lowpassFilter: LowpassFilter;
 let saturator: Saturator;
 let reverb: SimpleReverb;
 let vinylNoise: VinylNoise;
 let sidechain: SidechainCompressor;
+let tapeDegradation: TapeDegradation;
 
 // Generators
 let chordGen: ChordProgressionGenerator;
 let bassGen: BasslineGenerator;
 let drumGen: DrumPatternGenerator;
+let melodyGen: MelodyGenerator;
+
+// Song structure
+let songStructure: SongStructureManager;
+
+// Preset manager
+let presetManager: PresetManager;
 
 // Recording
 let mediaRecorder: MediaRecorder | null = null;
 let recordedChunks: Blob[] = [];
 
-// Mute states
+// Mute states (user manual mutes, separate from song structure)
 const muteStates = {
   drums: false,
   bass: false,
   pad: false,
-  ambience: false
+  ambience: false,
+  melody: false
 };
 
 // DOM Elements
@@ -65,6 +79,11 @@ const filterCutoff = document.getElementById('filter-cutoff') as HTMLInputElemen
 const reverbWet = document.getElementById('reverb-wet') as HTMLInputElement;
 const loadingEl = document.getElementById('loading') as HTMLDivElement;
 const visualizer = document.getElementById('visualizer') as HTMLCanvasElement;
+const melodyVolume = document.getElementById('melody-volume') as HTMLInputElement | null;
+const melodyMute = document.getElementById('melody-mute') as HTMLButtonElement | null;
+const presetSelect = document.getElementById('preset-select') as HTMLSelectElement | null;
+const savePresetBtn = document.getElementById('save-preset-btn') as HTMLButtonElement | null;
+const sectionDisplay = document.getElementById('section-display') as HTMLSpanElement | null;
 
 /**
  * Initialize the application
@@ -79,6 +98,7 @@ async function init(): Promise<void> {
   // Create synths
   bassSynth = new SubBassSynth();
   padSynth = new PadSynth();
+  rhodesSynth = new RhodesSynth();
 
   // Create effects
   lowpassFilter = new LowpassFilter();
@@ -86,6 +106,7 @@ async function init(): Promise<void> {
   reverb = new SimpleReverb();
   vinylNoise = new VinylNoise();
   sidechain = new SidechainCompressor();
+  tapeDegradation = new TapeDegradation();
 
   // Wire up signal chain
   const buses = getBuses();
@@ -93,17 +114,18 @@ async function init(): Promise<void> {
   // Disconnect default routing (instruments already connected to drums/bass/pad in audio-engine)
   buses.instruments.disconnect();
 
-  // New routing: instruments → sidechain → lowpass → saturator → reverb → master
-  // (drums/bass/pad → instruments connections already exist from audio-engine.ts)
+  // New routing: instruments → sidechain → lowpass → saturator → tape → reverb → master
   buses.instruments.connect(sidechain.getInputNode());
   sidechain.getOutputNode().connect(lowpassFilter.getInputNode());
   lowpassFilter.getOutputNode().connect(saturator.getInputNode());
-  saturator.getOutputNode().connect(reverb.getInputNode());
+  saturator.getOutputNode().connect(tapeDegradation.getInputNode());
+  tapeDegradation.getOutputNode().connect(reverb.getInputNode());
   reverb.getOutputNode().connect(buses.master);
 
   // Connect synths to buses
   bassSynth.connect(buses.bass);
   padSynth.connect(buses.pad);
+  rhodesSynth.connect(buses.pad); // Rhodes shares pad bus
 
   // Connect vinyl noise to ambience
   vinylNoise.connect(buses.ambience);
@@ -112,6 +134,14 @@ async function init(): Promise<void> {
   chordGen = new ChordProgressionGenerator(currentMood);
   bassGen = new BasslineGenerator();
   drumGen = new DrumPatternGenerator();
+  melodyGen = new MelodyGenerator();
+
+  // Create song structure manager
+  songStructure = new SongStructureManager();
+  songStructure.onFilterSweep(handleFilterSweep);
+
+  // Create preset manager
+  presetManager = new PresetManager();
 
   // Generate initial content
   generateNewContent();
@@ -123,12 +153,21 @@ async function init(): Promise<void> {
   // Bind UI events
   bindEvents();
 
+  // Bind keyboard shortcuts
+  bindKeyboardShortcuts();
+
+  // Parse URL parameters and apply them
+  applyUrlParams();
+
   // Set initial effect values
   const moodConfig = MOOD_CONFIGS[currentMood];
   lowpassFilter.setCutoff(moodConfig.filterCutoff);
   reverb.setWetDry(moodConfig.reverbWet);
   filterCutoff.value = String(moodConfig.filterCutoff);
   reverbWet.value = String(moodConfig.reverbWet * 100);
+
+  // Initialize preset UI
+  initPresetUI();
 
   // Setup visualization
   setupVisualization();
@@ -138,7 +177,7 @@ async function init(): Promise<void> {
 }
 
 /**
- * Generate new chord progression, bass, and drum patterns
+ * Generate new chord progression, bass, drum, and melody patterns
  */
 function generateNewContent(): void {
   const moodConfig = MOOD_CONFIGS[currentMood];
@@ -149,12 +188,20 @@ function generateNewContent(): void {
   // Generate drum patterns
   drumPatterns = drumGen.generatePattern(BARS_PER_PROGRESSION);
 
-  // Generate bass patterns
+  // Set key and mode for melody generator
+  melodyGen.setKeyAndMode(progression.key, progression.mode);
+  melodyGen.reset();
+
+  // Generate bass and melody patterns
   bassPatterns = [];
+  melodyPatterns = [];
+  previousPadVoicing = [];
+
   for (let i = 0; i < progression.chords.length; i++) {
     const chord = progression.chords[i];
     const nextChord = progression.chords[(i + 1) % progression.chords.length];
     bassPatterns.push(bassGen.generateBar(chord, nextChord, i));
+    melodyPatterns.push(melodyGen.generateBar(chord, i));
   }
 
   // Set BPM from mood range
@@ -169,8 +216,10 @@ function generateNewContent(): void {
     updateChordDisplay(progression.chords[0]);
   }
 
-  // Reset bar counter
+  // Reset bar counter and song structure
   currentBar = 0;
+  songStructure.reset();
+  updateSectionDisplay();
 }
 
 /**
@@ -183,10 +232,20 @@ function handleBeat(step: number, time: number): void {
   const bar = currentBar % BARS_PER_PROGRESSION;
   const drumPattern = drumPatterns[bar];
   const bassPattern = bassPatterns[bar];
+  const melodyPattern = melodyPatterns[bar];
   const chord = progression.chords[bar];
 
+  // Get song structure mute states (combined with user mutes)
+  const structureMutes = songStructure.getMuteStates();
+  const effectiveMutes = {
+    drums: muteStates.drums || structureMutes.drums,
+    bass: muteStates.bass || structureMutes.bass,
+    pad: muteStates.pad || structureMutes.pad,
+    melody: muteStates.melody || structureMutes.melody
+  };
+
   // Play drums
-  if (!muteStates.drums) {
+  if (!effectiveMutes.drums) {
     if (drumPattern.kick[step]) {
       playDrumSample('kick', time, drumPattern.velocities.kick[step]);
       // Trigger sidechain on kick
@@ -204,7 +263,7 @@ function handleBeat(step: number, time: number): void {
   }
 
   // Play bass notes
-  if (!muteStates.bass) {
+  if (!effectiveMutes.bass) {
     for (const note of bassPattern) {
       const noteStep = Math.floor(note.startBeat * 4); // Convert beat to step
       if (noteStep === step) {
@@ -214,10 +273,30 @@ function handleBeat(step: number, time: number): void {
     }
   }
 
-  // Play pad chord at the start of each bar
-  if (step === 0 && !muteStates.pad) {
+  // Play melody notes on Rhodes
+  if (!effectiveMutes.melody) {
+    for (const note of melodyPattern) {
+      if (note.startStep === step) {
+        const duration = transport.stepToTime(note.durationSteps);
+        rhodesSynth.triggerNote(note.pitch, time, duration, note.velocity);
+      }
+    }
+  }
+
+  // Play pad chord at the start of each bar with voice leading
+  if (step === 0 && !effectiveMutes.pad) {
     const padOctave = 4; // Middle octave for pad
-    const chordNotes = chordToMidiNotes(transposeToOctave(chord.root, padOctave), chord.quality);
+    const baseRoot = transposeToOctave(chord.root, padOctave);
+
+    // Use voice leading if we have a previous voicing
+    let chordNotes: number[];
+    if (previousPadVoicing.length > 0) {
+      chordNotes = voiceLeadTo(previousPadVoicing, baseRoot, chord.quality);
+    } else {
+      chordNotes = chordToMidiNotes(baseRoot, chord.quality);
+    }
+    previousPadVoicing = chordNotes;
+
     const duration = transport.beatToTime(4); // Full bar
     padSynth.triggerChord(chordNotes, time, duration, 0.6);
 
@@ -227,6 +306,11 @@ function handleBeat(step: number, time: number): void {
 
   // Advance bar counter at the end of each bar
   if (step === STEPS_PER_BAR - 1) {
+    const barDuration = transport.beatToTime(4);
+    const sectionChanged = songStructure.advanceBar(time, barDuration);
+    if (sectionChanged) {
+      updateSectionDisplay();
+    }
     currentBar = (currentBar + 1) % BARS_PER_PROGRESSION;
   }
 }
@@ -236,6 +320,45 @@ function handleBeat(step: number, time: number): void {
  */
 function updateChordDisplay(chord: Chord): void {
   currentChordEl.textContent = getChordDisplayName(chord);
+}
+
+/**
+ * Update section display
+ */
+function updateSectionDisplay(): void {
+  if (sectionDisplay) {
+    const section = songStructure.getCurrentSection();
+    sectionDisplay.textContent = section.charAt(0).toUpperCase() + section.slice(1);
+  }
+}
+
+/**
+ * Handle filter sweep at section transitions
+ */
+function handleFilterSweep(direction: 'up' | 'down', startTime: number, durationBars: number): void {
+  const transport = getTransport();
+  const duration = transport.beatToTime(durationBars * 4);
+  const ctx = getContext();
+
+  const startFreq = direction === 'up' ? 400 : 4000;
+  const endFreq = direction === 'up' ? 4000 : 400;
+
+  // Animate filter cutoff
+  lowpassFilter.setCutoff(startFreq);
+  // Schedule smooth transition
+  const steps = 20;
+  const stepDuration = duration / steps;
+
+  for (let i = 0; i <= steps; i++) {
+    const t = startTime + (i * stepDuration) - ctx.currentTime;
+    if (t > 0) {
+      setTimeout(() => {
+        const progress = i / steps;
+        const freq = startFreq + (endFreq - startFreq) * progress;
+        lowpassFilter.setCutoff(freq);
+      }, t * 1000);
+    }
+  }
 }
 
 /**
@@ -407,6 +530,9 @@ function bindEvents(): void {
 
     // Regenerate content
     generateNewContent();
+
+    // Update URL
+    updateUrlParams();
   });
 
   // BPM slider
@@ -415,6 +541,7 @@ function bindEvents(): void {
     const transport = getTransport();
     transport.setBPM(bpm);
     bpmValue.textContent = String(bpm);
+    updateUrlParams();
   });
 
   // Volume sliders
@@ -471,6 +598,26 @@ function bindEvents(): void {
     setAmbienceVolume(muteStates.ambience ? 0 : parseInt(ambienceVolume.value, 10) / 100);
   });
 
+  // Melody volume and mute (if UI elements exist)
+  if (melodyVolume) {
+    melodyVolume.addEventListener('input', () => {
+      if (!muteStates.melody) {
+        const vol = parseInt(melodyVolume.value, 10) / 100;
+        rhodesSynth.setLevel(vol);
+      }
+    });
+  }
+
+  if (melodyMute) {
+    melodyMute.addEventListener('click', () => {
+      muteStates.melody = !muteStates.melody;
+      melodyMute.classList.toggle('muted', muteStates.melody);
+      if (melodyVolume) {
+        rhodesSynth.setLevel(muteStates.melody ? 0 : parseInt(melodyVolume.value, 10) / 100);
+      }
+    });
+  }
+
   // Effect controls
   filterCutoff.addEventListener('input', () => {
     lowpassFilter.setCutoff(parseInt(filterCutoff.value, 10));
@@ -478,6 +625,214 @@ function bindEvents(): void {
 
   reverbWet.addEventListener('input', () => {
     reverb.setWetDry(parseInt(reverbWet.value, 10) / 100);
+  });
+}
+
+/**
+ * Initialize preset UI
+ */
+function initPresetUI(): void {
+  if (!presetSelect) return;
+
+  // Populate preset dropdown
+  populatePresetSelect();
+
+  // Preset select change handler
+  presetSelect.addEventListener('change', () => {
+    const presetName = presetSelect.value;
+    if (presetName) {
+      loadPreset(presetName);
+    }
+  });
+
+  // Save preset button
+  if (savePresetBtn) {
+    savePresetBtn.addEventListener('click', () => {
+      const name = prompt('Enter preset name:');
+      if (name && name.trim()) {
+        saveCurrentAsPreset(name.trim());
+      }
+    });
+  }
+}
+
+/**
+ * Populate preset select dropdown
+ */
+function populatePresetSelect(): void {
+  if (!presetSelect) return;
+
+  presetSelect.innerHTML = '<option value="">-- Select Preset --</option>';
+  for (const name of presetManager.getPresetNames()) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    presetSelect.appendChild(option);
+  }
+}
+
+/**
+ * Load a preset by name
+ */
+function loadPreset(name: string): void {
+  const preset = presetManager.getPreset(name);
+  if (!preset) return;
+
+  // Apply mood
+  currentMood = preset.mood;
+  moodSelect.value = preset.mood;
+  chordGen.setMood(currentMood);
+
+  // Apply BPM
+  const transport = getTransport();
+  transport.setBPM(preset.bpm);
+  bpmSlider.value = String(preset.bpm);
+  bpmValue.textContent = String(preset.bpm);
+
+  // Apply filter and reverb
+  lowpassFilter.setCutoff(preset.filterCutoff);
+  reverb.setWetDry(preset.reverbWet);
+  filterCutoff.value = String(preset.filterCutoff);
+  reverbWet.value = String(preset.reverbWet * 100);
+
+  // Apply volumes
+  setMasterVolume(preset.volumes.master / 100);
+  masterVolume.value = String(preset.volumes.master);
+
+  setDrumsVolume(preset.volumes.drums / 100);
+  drumsVolume.value = String(preset.volumes.drums);
+
+  setBassVolume(preset.volumes.bass / 100);
+  bassVolumeEl.value = String(preset.volumes.bass);
+
+  setPadVolume(preset.volumes.pad / 100);
+  padVolume.value = String(preset.volumes.pad);
+
+  setAmbienceVolume(preset.volumes.ambience / 100);
+  ambienceVolume.value = String(preset.volumes.ambience);
+
+  if (melodyVolume) {
+    rhodesSynth.setLevel(preset.volumes.melody / 100);
+    melodyVolume.value = String(preset.volumes.melody);
+  }
+
+  // Apply tape settings
+  tapeDegradation.setWowDepth(preset.tapeWow);
+  tapeDegradation.setFlutterDepth(preset.tapeFlutter);
+
+  // Apply pad stereo width
+  padSynth.setStereoWidth(preset.padStereoWidth);
+
+  // Track current preset
+  presetManager.setCurrentPresetName(name);
+
+  // Regenerate content for new mood
+  generateNewContent();
+  updateUrlParams();
+}
+
+/**
+ * Save current settings as a preset
+ */
+function saveCurrentAsPreset(name: string): void {
+  const transport = getTransport();
+
+  const preset: Preset = {
+    name,
+    mood: currentMood,
+    bpm: transport.getBPM(),
+    filterCutoff: parseInt(filterCutoff.value, 10),
+    reverbWet: parseInt(reverbWet.value, 10) / 100,
+    volumes: {
+      master: parseInt(masterVolume.value, 10),
+      drums: parseInt(drumsVolume.value, 10),
+      bass: parseInt(bassVolumeEl.value, 10),
+      pad: parseInt(padVolume.value, 10),
+      ambience: parseInt(ambienceVolume.value, 10),
+      melody: melodyVolume ? parseInt(melodyVolume.value, 10) : 60
+    },
+    tapeWow: 5, // Default, could add UI controls for these
+    tapeFlutter: 2,
+    padStereoWidth: padSynth.getStereoWidth()
+  };
+
+  presetManager.savePreset(preset);
+  populatePresetSelect();
+
+  if (presetSelect) {
+    presetSelect.value = name;
+  }
+}
+
+/**
+ * Parse URL parameters and apply them
+ */
+function applyUrlParams(): void {
+  const params = new URLSearchParams(window.location.search);
+
+  // Apply mood if valid
+  const mood = params.get('mood');
+  if (mood && ['chill', 'rainy', 'melancholic', 'upbeat'].includes(mood)) {
+    currentMood = mood as MoodPreset;
+    moodSelect.value = mood;
+    chordGen.setMood(currentMood);
+
+    // Update effects for mood
+    const moodConfig = MOOD_CONFIGS[currentMood];
+    lowpassFilter.setCutoff(moodConfig.filterCutoff);
+    reverb.setWetDry(moodConfig.reverbWet);
+    filterCutoff.value = String(moodConfig.filterCutoff);
+    reverbWet.value = String(moodConfig.reverbWet * 100);
+  }
+
+  // Apply BPM if valid
+  const bpmParam = params.get('bpm');
+  if (bpmParam) {
+    const bpm = parseInt(bpmParam, 10);
+    if (bpm >= 60 && bpm <= 100) {
+      const transport = getTransport();
+      transport.setBPM(bpm);
+      bpmSlider.value = String(bpm);
+      bpmValue.textContent = String(bpm);
+    }
+  }
+}
+
+/**
+ * Update URL with current settings (without reload)
+ */
+function updateUrlParams(): void {
+  const transport = getTransport();
+  const params = new URLSearchParams();
+  params.set('mood', currentMood);
+  params.set('bpm', String(transport.getBPM()));
+
+  const newUrl = `${window.location.pathname}?${params.toString()}`;
+  history.replaceState(null, '', newUrl);
+}
+
+/**
+ * Bind keyboard shortcuts
+ */
+function bindKeyboardShortcuts(): void {
+  document.addEventListener('keydown', (e) => {
+    // Ignore if user is typing in an input
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) {
+      return;
+    }
+
+    switch (e.code) {
+      case 'Space':
+        e.preventDefault(); // Prevent page scroll
+        togglePlay();
+        break;
+      case 'KeyR':
+        toggleRecord();
+        break;
+      case 'KeyN':
+        generateNewContent();
+        break;
+    }
   });
 }
 

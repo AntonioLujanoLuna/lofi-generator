@@ -54,6 +54,13 @@ export interface BassNote {
   velocity: number;
 }
 
+export interface MelodyNote {
+  pitch: number;
+  startStep: number;      // 0-15 within bar
+  durationSteps: number;
+  velocity: number;
+}
+
 export interface GeneratedBar {
   bass: BassNote[];
   drums: DrumPattern;
@@ -80,6 +87,28 @@ export interface AudioBuses {
   bass: GainNode;
   pad: GainNode;
   ambience: GainNode;
+}
+
+// Song structure types
+export type SongSection = 'intro' | 'verse' | 'breakdown' | 'buildup';
+
+export interface SectionConfig {
+  name: SongSection;
+  lengthBars: number;
+  mutes: {
+    drums: boolean;
+    bass: boolean;
+    pad: boolean;
+    melody: boolean;
+  };
+  filterSweep?: 'up' | 'down';
+}
+
+export interface InstrumentMuteState {
+  drums: boolean;
+  bass: boolean;
+  pad: boolean;
+  melody: boolean;
 }
 
 // Callback types

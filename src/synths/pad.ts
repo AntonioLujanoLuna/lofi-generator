@@ -9,6 +9,8 @@ export class PadSynth {
   private lfoGain: GainNode;
   private envelope = PAD_ENVELOPE;
   private detuneAmounts = [-7, 0, 7]; // Cents
+  private stereoWidth = 0.7; // 0-1, how spread the oscillators are L/R
+  private stereoPans = [-1, 0, 1]; // L, C, R panning for detuned oscs
 
   constructor() {
     const ctx = getContext();
@@ -49,13 +51,16 @@ export class PadSynth {
     chordGain.gain.value = 0;
     chordGain.connect(this.filter);
 
-    // Create oscillators for each pitch with detuning
+    // Create oscillators for each pitch with detuning and stereo spread
     const oscillators: OscillatorNode[] = [];
 
     for (const pitch of pitches) {
       const frequency = noteToFrequency(pitch);
 
-      for (const detune of this.detuneAmounts) {
+      for (let i = 0; i < this.detuneAmounts.length; i++) {
+        const detune = this.detuneAmounts[i];
+        const pan = this.stereoPans[i] * this.stereoWidth;
+
         const osc = ctx.createOscillator();
         osc.type = 'sawtooth';
         osc.frequency.value = frequency;
@@ -65,8 +70,13 @@ export class PadSynth {
         const oscGain = ctx.createGain();
         oscGain.gain.value = 0.15 / pitches.length; // Normalize by number of notes
 
+        // Stereo panner for width
+        const panner = ctx.createStereoPanner();
+        panner.pan.value = pan;
+
         osc.connect(oscGain);
-        oscGain.connect(chordGain);
+        oscGain.connect(panner);
+        panner.connect(chordGain);
         oscillators.push(osc);
       }
     }
@@ -149,5 +159,19 @@ export class PadSynth {
   setLFORate(hz: number): void {
     const ctx = getContext();
     this.lfo.frequency.setTargetAtTime(hz, ctx.currentTime, 0.1);
+  }
+
+  /**
+   * Set stereo width (0 = mono, 1 = full stereo spread)
+   */
+  setStereoWidth(width: number): void {
+    this.stereoWidth = Math.max(0, Math.min(1, width));
+  }
+
+  /**
+   * Get current stereo width
+   */
+  getStereoWidth(): number {
+    return this.stereoWidth;
   }
 }

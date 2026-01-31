@@ -154,3 +154,104 @@ export function transposeToOctave(midiNote: number, targetOctave: number): numbe
   const pitchClass = midiNote % 12;
   return pitchClass + (targetOctave + 1) * 12;
 }
+
+/**
+ * Generate a drop-2 voicing from a chord
+ * Drop-2: Move the second-highest note down an octave
+ * Creates more open, spread voicing commonly used in jazz
+ */
+export function generateDrop2Voicing(root: number, quality: ChordQuality): number[] {
+  const closeVoicing = chordToMidiNotes(root, quality);
+  if (closeVoicing.length < 4) return closeVoicing;
+
+  // Sort to ensure proper order
+  const sorted = [...closeVoicing].sort((a, b) => a - b);
+
+  // Move second-highest note down an octave
+  const secondHighestIndex = sorted.length - 2;
+  sorted[secondHighestIndex] -= 12;
+
+  // Re-sort to maintain order
+  return sorted.sort((a, b) => a - b);
+}
+
+/**
+ * Voice lead to a new chord with minimal voice movement
+ * Returns an inversion of the target chord that minimizes total movement
+ */
+export function voiceLeadTo(
+  previousVoicing: number[],
+  targetRoot: number,
+  targetQuality: ChordQuality
+): number[] {
+  if (previousVoicing.length === 0) {
+    return chordToMidiNotes(targetRoot, targetQuality);
+  }
+
+  const targetIntervals = CHORD_INTERVALS[targetQuality];
+  const numVoices = Math.min(previousVoicing.length, targetIntervals.length);
+
+  // Generate all possible inversions of target chord
+  const inversions: number[][] = [];
+  const baseOctave = Math.floor(previousVoicing[0] / 12);
+
+  for (let inv = 0; inv < targetIntervals.length; inv++) {
+    const voicing: number[] = [];
+    for (let i = 0; i < numVoices; i++) {
+      const intervalIndex = (i + inv) % targetIntervals.length;
+      let pitch = (baseOctave * 12) + (targetRoot % 12) + targetIntervals[intervalIndex];
+
+      // Adjust octave to be close to previous voicing average
+      const prevAvg = previousVoicing.reduce((a, b) => a + b, 0) / previousVoicing.length;
+      while (pitch < prevAvg - 12) pitch += 12;
+      while (pitch > prevAvg + 12) pitch -= 12;
+
+      voicing.push(pitch);
+    }
+    inversions.push(voicing.sort((a, b) => a - b));
+  }
+
+  // Find inversion with minimum total voice movement
+  let bestInversion = inversions[0];
+  let minMovement = Infinity;
+
+  for (const inversion of inversions) {
+    let totalMovement = 0;
+    const sortedPrev = [...previousVoicing].sort((a, b) => a - b);
+
+    for (let i = 0; i < Math.min(inversion.length, sortedPrev.length); i++) {
+      totalMovement += Math.abs(inversion[i] - sortedPrev[i]);
+    }
+
+    if (totalMovement < minMovement) {
+      minMovement = totalMovement;
+      bestInversion = inversion;
+    }
+  }
+
+  return bestInversion;
+}
+
+/**
+ * Get all inversions of a chord
+ */
+export function getInversions(root: number, quality: ChordQuality): number[][] {
+  const intervals = CHORD_INTERVALS[quality];
+  const inversions: number[][] = [];
+
+  for (let inv = 0; inv < intervals.length; inv++) {
+    const voicing: number[] = [];
+    for (let i = 0; i < intervals.length; i++) {
+      const intervalIndex = (i + inv) % intervals.length;
+      let pitch = root + intervals[intervalIndex];
+      // Move lower notes up an octave to maintain ascending order
+      if (i > 0 && pitch <= voicing[i - 1]) {
+        pitch += 12;
+      }
+      voicing.push(pitch);
+    }
+    inversions.push(voicing);
+  }
+
+  return inversions;
+}

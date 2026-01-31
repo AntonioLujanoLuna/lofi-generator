@@ -19,6 +19,10 @@
         <span class="label">Current Chord:</span>
         <span id="current-chord" class="chord-name">—</span>
       </div>
+      <div class="section-display">
+        <span class="label">Section:</span>
+        <span id="section-display" class="section-name">Intro</span>
+      </div>
       <div class="bpm-control">
         <span class="label">BPM:</span>
         <input type="range" id="bpm-slider" min="60" max="100" value="75">
@@ -39,15 +43,24 @@
       </button>
     </section>
 
-    <!-- Mood Selector -->
+    <!-- Mood and Preset Selector -->
     <section class="mood-section">
-      <label for="mood-select" class="label">Mood:</label>
-      <select id="mood-select" class="select">
-        <option value="chill">Chill</option>
-        <option value="rainy">Rainy</option>
-        <option value="melancholic">Melancholic</option>
-        <option value="upbeat">Upbeat</option>
-      </select>
+      <div class="mood-row">
+        <label for="mood-select" class="label">Mood:</label>
+        <select id="mood-select" class="select">
+          <option value="chill">Chill</option>
+          <option value="rainy">Rainy</option>
+          <option value="melancholic">Melancholic</option>
+          <option value="upbeat">Upbeat</option>
+        </select>
+      </div>
+      <div class="preset-row">
+        <label for="preset-select" class="label">Preset:</label>
+        <select id="preset-select" class="select">
+          <option value="">-- Select Preset --</option>
+        </select>
+        <button id="save-preset-btn" class="btn btn-small">Save</button>
+      </div>
     </section>
 
     <!-- Mix Controls -->
@@ -76,6 +89,11 @@
         <label class="label">Ambience</label>
         <input type="range" id="ambience-volume" min="0" max="100" value="40">
         <button id="ambience-mute" class="btn btn-mute">M</button>
+      </div>
+      <div class="mix-control">
+        <label class="label">Melody</label>
+        <input type="range" id="melody-volume" min="0" max="100" value="60">
+        <button id="melody-mute" class="btn btn-mute">M</button>
       </div>
     </section>
 
